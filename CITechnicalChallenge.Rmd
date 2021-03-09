@@ -1,0 +1,315 @@
+---
+title: "Plant data processing"
+author: "Hazel Anderson"
+date: "3/7/2021"
+output: pdf_document
+---
+# Load Required Packages
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(scico)
+library(rnaturalearth)
+library(smoothr)
+library(readr)
+library(raster)
+library(BIEN)
+library(stars)
+library(ggsn)
+```
+# BIEN Plant data in Guatemala
+```{r}
+#List of Species
+Guatemala <- BIEN_occurrence_country("Guatemala")
+Guatemala_species_list <- unique(Guatemala$scrubbed_species_binomial)
+    
+    
+#Species Maps for all plant species in Guatemala
+Guatemala_plant_species_list_vector <- unlist(Guatemala_species_list)
+Guatemala_plant_range_maps <- BIEN_ranges_load_species(species = Guatemala_plant_species_list_vector)
+    
+# Converting the SpatialPolygonsdataframe to shapefiles
+Guatemala_plants <- st_as_sf(Guatemala_plant_range_maps)
+```
+
+# Load in world map
+```{r}
+worldMap <- ne_countries(scale = "medium", type = "countries", returnclass = "sf")
+
+# country subset
+Guatemala_shp <- worldMap %>% filter(sovereignt == "Guatemala")
+
+# trim the map to appropriate study area. This zooms out of Ecuador, which will be easier for visualization down the line.
+limsCR <- st_buffer(Guatemala_shp, dist = 1) %>% st_bbox()
+
+# countries
+divpolPlot <-
+ggplot() +
+geom_sf(data = Guatemala_shp) +
+coord_sf(
+xlim = c(limsCR["xmin"], limsCR["xmax"]),
+ylim = c(limsCR["ymin"], limsCR["ymax"])
+) +
+scale_x_continuous(breaks = c(-84)) +
+theme(
+plot.background = element_rect(fill = "#ffffff"),
+panel.background = element_rect(fill = "#ffffff"),
+panel.grid = element_blank(),
+line = element_blank(),
+rect = element_blank()
+)
+divpolPlot
+```
+
+# Plot hulls
+```{r}
+hullsPlot <-
+ggplot() +
+geom_sf(data = Guatemala_shp) +
+geom_sf(data = Guatemala_plants, aes(fill = species), alpha = 0.7) +
+scale_fill_scico_d(palette = "davos", direction = -1, end = 0.9, guide = FALSE) +
+coord_sf(
+xlim = c(limsCR["xmin"], limsCR["xmax"]),
+ylim = c(limsCR["ymin"], limsCR["ymax"])
+) +
+scale_x_continuous(breaks = c(-84)) +
+theme(
+plot.background = element_rect(fill = "#FFFFFF"),
+panel.background = element_rect(fill = "#FFFFFF"),
+panel.grid = element_blank(),
+line = element_blank(),
+rect = element_blank()
+)
+hullsPlot
+```
+
+# Define a grid
+```{r}
+CRGrid <- Guatemala_shp %>%
+st_make_grid(cellsize = 0.2) %>%
+st_intersection(Guatemala_shp) %>%
+st_cast("MULTIPOLYGON") %>%
+st_sf() %>%
+mutate(cellid = row_number())
+```
+
+# Richness for convex hulls
+```{r}
+richness_gridEOO <- CRGrid %>%
+st_join(Guatemala_plants) %>%
+mutate(overlap = ifelse(!is.na(id), 1, 0)) %>%
+group_by(cellid) %>%
+summarize(num_species = sum(overlap))
+```
+
+# Empty grid, more detailed in nature
+```{r}
+gridPlot <-
+ggplot() +
+geom_sf(data =Guatemala_shp) +
+geom_sf(data = CRGrid) +
+coord_sf(
+xlim = c(limsCR["xmin"], limsCR["xmax"]),
+ylim = c(limsCR["ymin"], limsCR["ymax"])
+) +
+scale_x_continuous(breaks = c(-84)) +
+theme(
+plot.background = element_rect(fill = "#FFFFFF"),
+panel.background = element_rect(fill = "#FFFFFF"),
+panel.grid = element_blank(),
+line = element_blank(),
+rect = element_blank()
+)
+gridPlot
+```
+
+# Richness for convex hulls, more detailed
+```{r}
+gridRichCR_eoo <-
+ggplot(richness_gridEOO) +
+geom_sf(data = Guatemala_shp, fill = "grey", size = 0.1) +
+geom_sf(aes(fill = num_species), color = NA) +
+scale_fill_scico(palette = "davos", direction = -1, end = 0.9) +
+coord_sf(
+xlim = c(limsCR["xmin"], limsCR["xmax"]),
+ylim = c(limsCR["ymin"], limsCR["ymax"])
+) +
+scale_x_continuous(breaks = c(-84)) +
+theme(
+plot.background = element_rect(fill = "#FFFFFF"),
+panel.background = element_rect(fill = "#FFFFFF"),
+panel.grid = element_blank(),
+line = element_blank(),
+rect = element_blank(),
+axis.title.x = element_blank(),
+axis.title.y = element_blank()
+) + 
+labs(fill = "richness")
+
+
+gridRichCR_eoo
+
+```
+
+## Save richness plot
+```{r}
+ggsave("plantrichness.tiff" )
+```
+
+
+# Climate Data
+```{r}
+
+clim_45 <- raster::getData(name = 'CMIP5', var = 'bio', res = 10,
+        rcp = 45, model = 'IP', year = 70)
+
+clim_85 <- raster::getData(name = 'CMIP5', var = 'bio', res = 10,
+        rcp = 85, model = 'IP', year = 70)
+
+
+annual_T_rcp45 <- stars::read_stars("C:/Users/hj152/Documents/GitHub/CITechnicalChallenge/cmip5/10m/ip45bi701.tif")
+annual_T_rcp45 <- annual_T_rcp45/10
+
+annual_T_rcp85 <- stars::read_stars("C:/Users/hj152/Documents/GitHub/CITechnicalChallenge/cmip5/10m/ip85bi701.tif")
+annual_T_rcp85 <- annual_T_rcp85/10
+```
+
+```{r}
+temp_colors <- colorRampPalette(c("#2c7bb6", "#abd9e9", "#ffffbf", "#fdae61", "#d7191c"))
+nbreaks <- 20
+plot(annual_T_rcp45, main = "Annual temperature - RCP 4.5 projection for 2061-2080",
+     nbreaks = nbreaks,
+     col = temp_colors(nbreaks - 1))
+plot(annual_T_rcp85, main = "Annual temperature - RCP 8.5 projection for 2061-2080",
+     nbreaks = nbreaks,
+     col = temp_colors(nbreaks - 1))
+```
+
+```{r}
+central_america_map <- rnaturalearth::ne_countries(continent = "north america", country = c("el salvador", "costa rica", "belize", "guatemala", "honduras", "nicaragua", "panama"), returnclass = "sf")
+
+
+central_america_map <- st_union(central_america_map)
+
+{
+par(mar = c(0,0,0,0))
+plot(central_america_map)
+}
+```
+
+```{r}
+
+st_crs(annual_T_rcp45) <- st_crs(central_america_map)
+annual_T_rcp45_CA <- annual_T_rcp45[central_america_map]
+
+
+st_crs(annual_T_rcp85) <- st_crs(central_america_map)
+annual_T_rcp85_CA <- annual_T_rcp85[central_america_map]
+```
+
+```{r}
+annual_T_rcp45_CA_plot <- plot(main = "Annual temperature - RCP 4.5 projection for 2061-2080",
+                          annual_T_rcp45_CA, nbreaks = nbreaks,
+                          col = temp_colors(nbreaks - 1))
+
+annual_T_rcp85_CA_plot <- plot(main = "Annual temperature - RCP 8.5 projection for 2061-2080",
+                          annual_T_rcp85_CA, nbreaks = nbreaks,
+                          col = temp_colors(nbreaks - 1))
+annual_T_rcp45_CA_plot
+annual_T_rcp85_CA_plot
+```
+
+
+
+
+```{r}
+annual_T_rcp45_CA
+
+annual_T_rcp85_CA
+```
+```{r}
+mean(annual_T_rcp45_CA$ip45bi701.tif, na.rm = T)
+mean(annual_T_rcp85_CA$ip85bi701.tif, na.rm = T)
+
+annual_T_rcp45_CA$projected45 <- annual_T_rcp45_CA$ip45bi701.tif
+annual_T_rcp85_CA$projected85 <- annual_T_rcp85_CA$ip85bi701.tif
+annual_T_rcp85_CA$change <- annual_T_rcp85_CA$projected85  - annual_T_rcp45_CA$projected45
+annual_T_rcp85_CA
+```
+```{r}
+library(patchwork)
+rcp45_T_plot <- ggplot() + 
+  geom_stars(data = annual_T_rcp45_CA) +
+  scale_fill_gradientn(name = "Annual T [°C]",
+                       colors = temp_colors(5),
+                       limits = c(-7, 32),
+                       na.value = "white") +
+  geom_sf(data = central_america_map, fill = NA) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+  ggtitle("a)Projected RCP 4.5 2061-80") +
+  theme_void() +
+  theme(legend.position = "none")
+
+rcp85_T_plot <- ggplot() + 
+  geom_stars(data = annual_T_rcp45_CA) +
+  scale_fill_gradientn(name = "Annual T [°C]",
+                       colors = temp_colors(5),
+                       limits = c(-7, 32),
+                       na.value = "white") +
+  geom_sf(data = central_america_map, fill = NA) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+  ggtitle("b)Projected RCP 8.5 2061-80") +
+  theme_void() +
+  theme(legend.position = "bottom")
+
+projected_change_T_plot <- ggplot() + 
+  geom_stars(data = annual_T_rcp85_CA["change"]) +
+  scale_fill_gradientn(name = "Difference in T [°C]",
+                       colors = temp_colors(5)[3:5],
+                       limits = c(1, 5),
+                       na.value = "white") +
+  geom_sf(data = central_america_map, fill = NA) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+  ggtitle("c)Projection difference") +
+  theme_void() +
+  theme(legend.position = "bottom")
+
+(rcp45_T_plot / rcp85_T_plot + plot_layout(guides = "keep")) | projected_change_T_plot +
+  theme(plot.margin = margin(c(0, 0, 0, 0)))
+```
+
+```{r}
+raster_rcp45 <- raster("C:/Users/hj152/Documents/GitHub/CITechnicalChallenge/cmip5/10m/ip45bi701.tif")
+raster_rcp45 <- raster_rcp45/10
+raster_rcp85 <-raster("C:/Users/hj152/Documents/GitHub/CITechnicalChallenge/cmip5/10m/ip85bi701.tif")
+raster_rcp85 <- raster_rcp85/10
+```
+```{r}
+plot(raster_rcp45)
+plot(raster_rcp85)
+```
+
+
+```{r}
+par(
+  mfrow=c(1,2),
+  mar=c(4,4,1,0)
+)
+# plot histogram
+hist(raster_rcp45,
+     main = "RCP 4.5 Temp. Distribution",
+     xlab = "temperature (C)", ylab = "Frequency",
+     col = "purple")
+hist(raster_rcp85,
+     main = "RCP 8.5 Temp. Distribution",
+     xlab = "temperature (C)", ylab = "Frequency",
+     col = "blue")
+```
+
+
+
+
